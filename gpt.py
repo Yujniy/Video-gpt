@@ -45,12 +45,14 @@ def process_with_nvidia(transcript_text, api_key, messages):
     
     response_text = ""
     for chunk in completion:
-        if chunk.choices[0].delta.content is not None:
-            response_text += chunk.choices[0].delta.content
+        delta = chunk.choices[0].delta
+        if delta.get("content") is not None:
+            response_text += delta["content"]
     
     messages.append({"role": "assistant", "content": response_text})
     
     return response_text, messages
+
 
 def process_with_groq(transcript_text, api_key, model, messages):
     client = Groq(api_key=api_key)
