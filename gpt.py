@@ -96,6 +96,23 @@ def process_with_free(transcript_text, messages):
     
     return response_text, messages
 
+def process_question(question, messages, provider, api_key, model=None):
+    if provider == "Nvidia":
+        if api_key:
+            _, messages = process_with_nvidia("", api_key, messages)
+        else:
+            st.warning("Пожалуйста, введите API ключ для Nvidia.")
+    elif provider == "Groq":
+        if api_key:
+            _, messages = process_with_groq("", api_key, model, messages)
+        else:
+            st.warning("Пожалуйста, введите API ключ для Groq.")
+    else:
+        _, messages = process_with_free("", messages)
+    
+    return messages
+
+
 def load_api_key(provider):
     config = configparser.ConfigParser()
     if os.path.exists(CONFIG_FILE):
@@ -179,6 +196,41 @@ def main():
                 response_text, messages = process_with_free(transcript_text, messages)
                 st.subheader("Ответ от бесплатной модели:")
                 st.markdown(response_text)
+
+            st.subheader("Чат")
+
+            chat_container = st.empty()
+            question_container = st.empty()
+            
+            with question_container:
+                question = st.text_input("Задайте уточняющий вопрос:")
+            
+            if st.button("Отправить"):
+                if question:
+                    messages.append({"role": "user", "content": question})
+                    if provider == "Groq":
+                        messages = process_question(question, messages[-5:], provider, api_key, model)
+                    else:
+                        messages = process_question(question, messages[-5:], provider, api_key)
+                    
+                    chat_history = ""
+                    for message in messages[:-5]:
+                        if message["role"] == "user":
+                            chat_history += f"<p><strong>Пользователь:</strong> {message['content']}</p>"
+                        else:
+                            chat_history += f"<p><em>Ассистент:</em> {message['content']}</p>"
+                    
+                    chat_history += f"<p><strong>Пользователь:</strong> {question}</p>"
+                    chat_history += f"<p><em>Ассистент:</em> {messages[-1]['content']}</p>"
+                    
+                    chat_container.markdown(chat_history, unsafe_allow_html=True)
+                    
+                    # Удаление текущего поля ввода
+                    question_container.empty()
+                    
+                    # Создание нового чистого поля ввода
+                    with question_container:
+                        st.text_input("Задайте уточняющий вопрос:", key=f"question_{len(messages)}")
 
         except Exception as e:
             st.error(f"Не удалось получить текст. Ошибка: {str(e)}")
