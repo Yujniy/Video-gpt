@@ -1,23 +1,3 @@
-import subprocess
-import sys
-
-def install(package):
-    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-# Список необходимых библиотек
-required_libraries = [
-    "streamlit",
-    "youtube_transcript_api",
-    "openai",
-    "configparser"
-    # Добавьте здесь другие библиотеки, которые вам нужны
-]
-
-# Установка всех необходимых библиотек
-for lib in required_libraries:
-    install(lib)
-
-# Теперь можно импортировать установленные библиотеки
 import streamlit as st
 from youtube_transcript_api import YouTubeTranscriptApi
 import re
