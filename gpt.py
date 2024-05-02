@@ -114,34 +114,27 @@ def process_question(question, messages, provider, api_key, model=None):
 
 
 def load_api_key(provider):
-    config = configparser.ConfigParser()
-    if os.path.exists(CONFIG_FILE):
-        config.read(CONFIG_FILE)
-        if provider in config:
-            return config[provider].get("api_key", "")
-    return ""
+    return st.session_state.get(f"{provider}_api_key", "")
 
 def save_api_key(provider, api_key):
-    config = configparser.ConfigParser()
-    if os.path.exists(CONFIG_FILE):
-        config.read(CONFIG_FILE)
-    if provider not in config:
-        config[provider] = {}
-    config[provider]["api_key"] = api_key
-    with open(CONFIG_FILE, "w") as config_file:
-        config.write(config_file)
+    if f"{provider}_api_key" not in st.session_state:
+        st.session_state[f"{provider}_api_key"] = api_key
+
+
 
 def main():
-    st.title("YouTube Video Transcript Summary")
+    st.title("YouTube Video Summary")
     
     st.sidebar.title("Настройки")
     provider = st.sidebar.selectbox("Поставщик", ["Free", "Nvidia", "Groq"], index=0)
     
     api_key = None
     if provider in ["Nvidia", "Groq"]:
-        api_key = st.sidebar.text_input(f"API ключ для {provider}", type="password", value=load_api_key(provider))
-        if api_key:
-            save_api_key(provider, api_key)
+        if f"{provider}_api_key" not in st.session_state:
+            st.session_state[f"{provider}_api_key"] = load_api_key(provider)
+        api_key = st.sidebar.text_input(f"API ключ для {provider}", type="password", value=st.session_state[f"{provider}_api_key"], key=f"{provider}_api_key")
+        save_api_key(provider, api_key)
+
     
     if provider == "Nvidia":
         st.sidebar.subheader("Информация о модели")
