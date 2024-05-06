@@ -6,7 +6,7 @@ from groq import Groq
 from g4f.client import Client
 import configparser
 import os
-from moviepy.editor import VideoFileClip
+from pydub import AudioSegment
 import speech_recognition as sr
 import tempfile
 import io
@@ -38,10 +38,9 @@ def extract_audio(video_file):
             f.write(video_file.getbuffer())
         
         # Извлечение аудио из временного файла
-        video = VideoFileClip(temp_file_path)
+        audio = AudioSegment.from_file(temp_file_path)
         audio_file_path = os.path.join(temp_dir, f"{video_file.name}.wav")
-        video.audio.write_audiofile(audio_file_path)
-        video.close()
+        audio.export(audio_file_path, format="wav")
         
         # Открытие аудиофайла и возврат объекта файла
         with open(audio_file_path, "rb") as audio_file:
@@ -55,6 +54,7 @@ def audio_to_text(audio_file):
         audio_data = recognizer.record(source)
         text = recognizer.recognize_google(audio_data, language='ru-RU')
     return text
+
 
 def process_with_nvidia(transcript_text, api_key, messages):
     openai.api_base = "https://integrate.api.nvidia.com/v1"
