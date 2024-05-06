@@ -6,6 +6,10 @@ from groq import Groq
 from g4f.client import Client
 import configparser
 import os
+from moviepy.editor import VideoFileClip
+import speech_recognition as sr
+import tempfile
+import io
 
 CONFIG_FILE = "config.ini"
 
@@ -20,12 +24,37 @@ def get_video_id(url):
 
 def get_video_transcript(video_id):
     transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['ru', 'en'])
-    
     script_text = ""
     for text_segment in transcript:
         script_text += text_segment['text'] + "\n"
-    
     return script_text
+
+def extract_audio(video_file):
+    # Создание временной директории
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Сохранение загруженного файла во временную директорию
+        temp_file_path = os.path.join(temp_dir, video_file.name)
+        with open(temp_file_path, "wb") as f:
+            f.write(video_file.getbuffer())
+        
+        # Извлечение аудио из временного файла
+        video = VideoFileClip(temp_file_path)
+        audio_file_path = os.path.join(temp_dir, f"{video_file.name}.wav")
+        video.audio.write_audiofile(audio_file_path)
+        video.close()
+        
+        # Открытие аудиофайла и возврат объекта файла
+        with open(audio_file_path, "rb") as audio_file:
+            audio_data = io.BytesIO(audio_file.read())
+        
+    return audio_data
+
+def audio_to_text(audio_file):
+    recognizer = sr.Recognizer()
+    with sr.AudioFile(audio_file) as source:
+        audio_data = recognizer.record(source)
+        text = recognizer.recognize_google(audio_data, language='ru-RU')
+    return text
 
 def process_with_nvidia(transcript_text, api_key, messages):
     openai.api_base = "https://integrate.api.nvidia.com/v1"
@@ -125,7 +154,7 @@ def save_api_key(provider, api_key):
 
 
 def main():
-    st.title("YouTube Video Summary")
+    st.title("YouTube Video and Local Video Summary")
     
     st.sidebar.title("Настройки")
     provider = st.sidebar.selectbox("Поставщик", ["Free", "Nvidia", "Groq"], index=0)
@@ -164,71 +193,71 @@ def main():
             st.sidebar.write("Developer: Anthropic")
     
     video_url = st.text_input("Введите URL видео на YouTube:")
+    uploaded_video = st.file_uploader("Или загрузите видео с вашего устройства:", type=["mp4", "avi", "mov"])
     
-    if video_url:
-        video_id = get_video_id(video_url)
-        
-        try:
+    if video_url or uploaded_video:
+        if video_url:
+            video_id = get_video_id(video_url)
             transcript_text = get_video_transcript(video_id)
-            
-            messages = [{"role": "system", "content": f"Вы - помощник, который отвечает на вопросы по видео. Держите в уме текст видео и последние 5 вопросов пользователя."}]
-            
-            if provider == "Nvidia":
-                if api_key:
-                    response_text, messages = process_with_nvidia(transcript_text, api_key, messages)
-                    st.subheader("Ответ от модели Nvidia:")
-                    st.markdown(response_text)
-                else:
-                    st.warning("Пожалуйста, введите API ключ для Nvidia.")
-            elif provider == "Groq":
-                if api_key:
-                    response_text, messages = process_with_groq(transcript_text, api_key, model, messages)
-                    st.subheader("Ответ от модели Groq:")
-                    st.markdown(response_text)
-                else:
-                    st.warning("Пожалуйста, введите API ключ для Groq.")
-            else:
-                response_text, messages = process_with_free(transcript_text, messages)
-                st.subheader("Ответ от бесплатной модели:")
+        else:
+            audio_file = extract_audio(uploaded_video)
+            transcript_text = audio_to_text(audio_file)
+        
+        messages = [{"role": "system", "content": f"Вы - помощник, который отвечает на вопросы по видео. Держите в уме текст видео и последние 5 вопросов пользователя."}]
+        
+        if provider == "Nvidia":
+            if api_key:
+                response_text, messages = process_with_nvidia(transcript_text, api_key, messages)
+                st.subheader("Ответ от модели Nvidia:")
                 st.markdown(response_text)
+            else:
+                st.warning("Пожалуйста, введите API ключ для Nvidia.")
+        elif provider == "Groq":
+            if api_key:
+                response_text, messages = process_with_groq(transcript_text, api_key, model, messages)
+                st.subheader("Ответ от модели Groq:")
+                st.markdown(response_text)
+            else:
+                st.warning("Пожалуйста, введите API ключ для Groq.")
+        else:
+            response_text, messages = process_with_free(transcript_text, messages)
+            st.subheader("Ответ от бесплатной модели:")
+            st.markdown(response_text)
 
-            st.subheader("Чат")
+        st.subheader("Чат")
 
-            chat_container = st.empty()
-            question_container = st.empty()
-            
-            with question_container:
-                question = st.text_input("Задайте уточняющий вопрос:")
-            
-            if st.button("Отправить"):
-                if question:
-                    messages.append({"role": "user", "content": question})
-                    if provider == "Groq":
-                        messages = process_question(question, messages[-5:], provider, api_key, model)
+        chat_container = st.empty()
+        question_container = st.empty()
+        
+        with question_container:
+            question = st.text_input("Задайте уточняющий вопрос:")
+        
+        if st.button("Отправить"):
+            if question:
+                messages.append({"role": "user", "content": question})
+                if provider == "Groq":
+                    messages = process_question(question, messages[-5:], provider, api_key, model)
+                else:
+                    messages = process_question(question, messages[-5:], provider, api_key)
+                
+                chat_history = ""
+                for message in messages[:-5]:
+                    if message["role"] == "user":
+                        chat_history += f"<p><strong>Пользователь:</strong> {message['content']}</p>"
                     else:
-                        messages = process_question(question, messages[-5:], provider, api_key)
-                    
-                    chat_history = ""
-                    for message in messages[:-5]:
-                        if message["role"] == "user":
-                            chat_history += f"<p><strong>Пользователь:</strong> {message['content']}</p>"
-                        else:
-                            chat_history += f"<p><em>Ассистент:</em> {message['content']}</p>"
-                    
-                    chat_history += f"<p><strong>Пользователь:</strong> {question}</p>"
-                    chat_history += f"<p><em>Ассистент:</em> {messages[-1]['content']}</p>"
-                    
-                    chat_container.markdown(chat_history, unsafe_allow_html=True)
-                    
-                    # Удаление текущего поля ввода
-                    question_container.empty()
-                    
-                    # Создание нового чистого поля ввода
-                    with question_container:
-                        st.text_input("Задайте уточняющий вопрос:", key=f"question_{len(messages)}")
-
-        except Exception as e:
-            st.error(f"Не удалось получить текст. Ошибка: {str(e)}")
+                        chat_history += f"<p><em>Ассистент:</em> {message['content']}</p>"
+                
+                chat_history += f"<p><strong>Пользователь:</strong> {question}</p>"
+                chat_history += f"<p><em>Ассистент:</em> {messages[-1]['content']}</p>"
+                
+                chat_container.markdown(chat_history, unsafe_allow_html=True)
+                
+                # Удаление текущего поля ввода
+                question_container.empty()
+                
+                # Создание нового чистого поля ввода
+                with question_container:
+                    st.text_input("Задайте уточняющий вопрос:", key=f"question_{len(messages)}")
 
 if __name__ == "__main__":
     main()

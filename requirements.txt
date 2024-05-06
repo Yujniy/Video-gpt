@@ -1,4 +1,8 @@
+streamlit
 youtube_transcript_api
 openai
 groq
 g4f
+configparser
+moviepy
+SpeechRecognition
