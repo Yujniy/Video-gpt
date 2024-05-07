@@ -5,11 +5,13 @@ import openai
 from groq import Groq
 from g4f.client import Client
 import configparser
-import os
 from pydub import AudioSegment
 import speech_recognition as sr
+from moviepy.editor import VideoFileClip
 import tempfile
+import os
 import io
+
 
 CONFIG_FILE = "config.ini"
 
@@ -37,10 +39,19 @@ def extract_audio(video_file):
         with open(temp_file_path, "wb") as f:
             f.write(video_file.getbuffer())
         
-        # Извлечение аудио из временного файла
-        audio = AudioSegment.from_file(temp_file_path)
+        # Загрузка видеофайла с помощью moviepy
+        video = VideoFileClip(temp_file_path)
+        
+        # Извлечение аудио из видео
+        audio = video.audio
+        
+        # Сохранение аудио во временный файл
         audio_file_path = os.path.join(temp_dir, f"{video_file.name}.wav")
-        audio.export(audio_file_path, format="wav")
+        audio.write_audiofile(audio_file_path, codec='pcm_s16le')
+        
+        # Закрытие видео и аудио объектов
+        video.close()
+        audio.close()
         
         # Открытие аудиофайла и возврат объекта файла
         with open(audio_file_path, "rb") as audio_file:
@@ -61,22 +72,23 @@ def process_with_nvidia(transcript_text, api_key, messages):
     openai.api_key = api_key
     
     if transcript_text:
-        messages.append({"role": "user", "content": f"Пожалуйста сделай вижимку видео на русском языке по темам, применяй форматирование:\n\n{transcript_text}"})
+        messages.append({"role": "user", "content": f"Пожалуйста, создай краткое содержание видео на русском языке, разделенное по темам. Используй форматирование, чтобы улучшить читаемость:\n\n{transcript_text}"})
     
-    completion = openai.ChatCompletion.create(
-        model="meta/llama3-70b-instruct",
-        messages=messages,
-        temperature=0.5,
-        top_p=1,
-        max_tokens=1024,
-        stream=True
-    )
-    
-    response_text = ""
-    for chunk in completion:
-        delta = chunk.choices[0].delta
-        if delta.get("content") is not None:
-            response_text += delta["content"]
+    with st.spinner("Конспектирование видео..."):
+        completion = openai.ChatCompletion.create(
+            model="meta/llama3-70b-instruct",
+            messages=messages,
+            temperature=0.5,
+            top_p=1,
+            max_tokens=1024,
+            stream=True
+        )
+        
+        response_text = ""
+        for chunk in completion:
+            delta = chunk.choices[0].delta
+            if delta.get("content") is not None:
+                response_text += delta["content"]
     
     messages.append({"role": "assistant", "content": response_text})
     
@@ -87,21 +99,22 @@ def process_with_groq(transcript_text, api_key, model, messages):
     client = Groq(api_key=api_key)
     
     if transcript_text:
-        messages.append({"role": "user", "content": f"Пожалуйста сделай вижимку видео на русском языке по темам, применяй форматирование:\n\n{transcript_text}"})
+        messages.append({"role": "user", "content": f"Пожалуйста, создай краткое содержание видео на русском языке, разделенное по темам. Используй форматирование, чтобы улучшить читаемость:\n\n{transcript_text}"})
     
-    completion = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=1,
-        max_tokens=1024,
-        top_p=1,
-        stream=True,
-        stop=None,
-    )
-    
-    response_text = ""
-    for chunk in completion:
-        response_text += chunk.choices[0].delta.content or ""
+    with st.spinner("Конспектирование видео..."):
+        completion = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=1,
+            max_tokens=1024,
+            top_p=1,
+            stream=True,
+            stop=None,
+        )
+        
+        response_text = ""
+        for chunk in completion:
+            response_text += chunk.choices[0].delta.content or ""
     
     messages.append({"role": "assistant", "content": response_text})
     
@@ -111,21 +124,23 @@ def process_with_free(transcript_text, messages):
     client = Client()
     
     if transcript_text:
-        messages.append({"role": "user", "content": f"Пожалуйста сделай вижимку видео на русском языке по темам, применяй форматирование:\n\n{transcript_text}"})
+        messages.append({"role": "user", "content": f"Пожалуйста, создай краткое содержание видео на русском языке, разделенное по темам. Используй форматирование, чтобы улучшить читаемость:\n\n{transcript_text}"})
     
-    completion = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=messages,
-        stream=True
-    )
-    
-    response_text = ""
-    for chunk in completion:
-        response_text += chunk.choices[0].delta.content or ""
+    with st.spinner("Конспектирование видео..."):
+        completion = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            stream=True
+        )
+        
+        response_text = ""
+        for chunk in completion:
+            response_text += chunk.choices[0].delta.content or ""
     
     messages.append({"role": "assistant", "content": response_text})
     
     return response_text, messages
+
 
 def process_question(question, messages, provider, api_key, model=None):
     if provider == "Nvidia":
