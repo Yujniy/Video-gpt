@@ -4,5 +4,6 @@ openai
 groq
 g4f
 configparser
-moviepy
 SpeechRecognition
+pytube
+moviepy

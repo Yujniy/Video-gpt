@@ -4,16 +4,12 @@ import re
 import openai
 from groq import Groq
 from g4f.client import Client
-import configparser
-from pydub import AudioSegment
 import speech_recognition as sr
-from moviepy.editor import VideoFileClip
+from pytube import YouTube
 import tempfile
 import os
-import io
+from moviepy.editor import VideoFileClip
 
-
-CONFIG_FILE = "config.ini"
 
 def get_video_id(url):
     if "youtu.be" in url:
@@ -31,33 +27,31 @@ def get_video_transcript(video_id):
         script_text += text_segment['text'] + "\n"
     return script_text
 
-def extract_audio(video_file):
-    # Создание временной директории
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Сохранение загруженного файла во временную директорию
-        temp_file_path = os.path.join(temp_dir, video_file.name)
-        with open(temp_file_path, "wb") as f:
-            f.write(video_file.getbuffer())
-        
-        # Загрузка видеофайла с помощью moviepy
-        video = VideoFileClip(temp_file_path)
-        
-        # Извлечение аудио из видео
-        audio = video.audio
-        
-        # Сохранение аудио во временный файл
-        audio_file_path = os.path.join(temp_dir, f"{video_file.name}.wav")
-        audio.write_audiofile(audio_file_path, codec='pcm_s16le')
-        
-        # Закрытие видео и аудио объектов
-        video.close()
-        audio.close()
-        
-        # Открытие аудиофайла и возврат объекта файла
-        with open(audio_file_path, "rb") as audio_file:
-            audio_data = io.BytesIO(audio_file.read())
-        
-    return audio_data
+def extract_audio(uploaded_file):
+    # Сохранение загруженного файла во временную директорию
+    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+        temp_file.write(uploaded_file.read())
+        temp_file_path = temp_file.name
+    
+    # Загрузка видеофайла с помощью moviepy
+    video = VideoFileClip(temp_file_path)
+    
+    # Извлечение аудио из видео
+    audio = video.audio
+    
+    # Сохранение аудио во временный файл
+    audio_file_path = os.path.join(tempfile.gettempdir(), f"{uploaded_file.name}.wav")
+    audio.write_audiofile(audio_file_path, codec='pcm_s16le')
+    
+    # Закрытие видео и аудио объектов
+    video.close()
+    audio.close()
+    
+    # Удаление временного файла
+    os.unlink(temp_file_path)
+    
+    return audio_file_path
+
 
 def audio_to_text(audio_file):
     recognizer = sr.Recognizer()
@@ -67,7 +61,7 @@ def audio_to_text(audio_file):
     return text
 
 
-def process_with_nvidia(transcript_text, api_key, messages):
+def process_with_nvidia(transcript_text, api_key, messages, temperature, top_p, max_tokens):
     openai.api_base = "https://integrate.api.nvidia.com/v1"
     openai.api_key = api_key
     
@@ -78,9 +72,9 @@ def process_with_nvidia(transcript_text, api_key, messages):
         completion = openai.ChatCompletion.create(
             model="meta/llama3-70b-instruct",
             messages=messages,
-            temperature=0.5,
-            top_p=1,
-            max_tokens=1024,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
             stream=True
         )
         
@@ -142,10 +136,10 @@ def process_with_free(transcript_text, messages):
     return response_text, messages
 
 
-def process_question(question, messages, provider, api_key, model=None):
+def process_question(question, messages, provider, api_key, temperature=None, top_p=None, max_tokens=None, model=None):
     if provider == "Nvidia":
         if api_key:
-            _, messages = process_with_nvidia("", api_key, messages)
+            _, messages = process_with_nvidia("", api_key, messages, temperature, top_p, max_tokens)
         else:
             st.warning("Пожалуйста, введите API ключ для Nvidia.")
     elif provider == "Groq":
@@ -157,7 +151,6 @@ def process_question(question, messages, provider, api_key, model=None):
         _, messages = process_with_free("", messages)
     
     return messages
-
 
 def load_api_key(provider):
     return st.session_state.get(f"{provider}_api_key", "")
@@ -187,6 +180,11 @@ def main():
         st.sidebar.write("Model ID: meta/llama3-70b-instruct")
         st.sidebar.write("Developer: Meta")
         st.sidebar.write("Context Window: 8,192 tokens")
+
+        with st.sidebar.expander("Настройки модели"):
+            temperature = st.slider("Температура", min_value=0.0, max_value=1.0, value=0.5, step=0.1)
+            top_p = st.slider("Top-p", min_value=0.0, max_value=1.0, value=1.0, step=0.1)
+            max_tokens = st.number_input("Максимальное количество токенов", min_value=1, max_value=1024, value=1024, step=1)
     elif provider == "Groq":
         model = st.sidebar.selectbox("Модель", ["llama3-8b-8192", "llama3-70b-8192", "mixtral-8x7b-32768", "gemma-7b"])
         
@@ -206,7 +204,7 @@ def main():
         elif model == "gemma-7b":
             st.sidebar.write("Model ID: gemma-7b")
             st.sidebar.write("Developer: Anthropic")
-    
+        
     video_url = st.text_input("Введите URL видео на YouTube:")
     uploaded_video = st.file_uploader("Или загрузите видео с вашего устройства:", type=["mp4", "avi", "mov"])
     
@@ -222,7 +220,7 @@ def main():
         
         if provider == "Nvidia":
             if api_key:
-                response_text, messages = process_with_nvidia(transcript_text, api_key, messages)
+                response_text, messages = process_with_nvidia(transcript_text, api_key, messages, temperature, top_p, max_tokens)
                 st.subheader("Ответ от модели Nvidia:")
                 st.markdown(response_text)
             else:
@@ -251,7 +249,9 @@ def main():
             if question:
                 messages.append({"role": "user", "content": question})
                 if provider == "Groq":
-                    messages = process_question(question, messages[-5:], provider, api_key, model)
+                    messages = process_question(question, messages[-5:], provider, api_key, model=model)
+                elif provider == "Nvidia":
+                    messages = process_question(question, messages[-5:], provider, api_key, temperature=temperature, top_p=top_p, max_tokens=max_tokens)
                 else:
                     messages = process_question(question, messages[-5:], provider, api_key)
                 
