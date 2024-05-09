@@ -28,38 +28,38 @@ def get_video_transcript(video_id):
     return script_text
 
 def extract_audio(uploaded_file):
-    # Сохранение загруженного файла во временную директорию
-    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-        temp_file.write(uploaded_file.read())
-        temp_file_path = temp_file.name
-    
-    # Загрузка видеофайла с помощью moviepy
-    video = VideoFileClip(temp_file_path)
-    
-    # Извлечение аудио из видео
-    audio = video.audio
-    
-    # Сохранение аудио во временный файл
-    audio_file_path = os.path.join(tempfile.gettempdir(), f"{uploaded_file.name}.wav")
-    audio.write_audiofile(audio_file_path, codec='pcm_s16le')
-    
-    # Закрытие видео и аудио объектов
-    video.close()
-    audio.close()
-    
-    # Удаление временного файла
-    os.unlink(temp_file_path)
+    with st.spinner("Извлечение аудио..."):
+        # Сохранение загруженного файла во временную директорию
+        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            temp_file.write(uploaded_file.read())
+            temp_file_path = temp_file.name
+        
+        # Загрузка видеофайла с помощью moviepy
+        video = VideoFileClip(temp_file_path)
+        
+        # Извлечение аудио из видео
+        audio = video.audio
+        
+        # Сохранение аудио во временный файл
+        audio_file_path = os.path.join(tempfile.gettempdir(), f"{uploaded_file.name}.wav")
+        audio.write_audiofile(audio_file_path, codec='pcm_s16le')
+        
+        # Закрытие видео и аудио объектов
+        video.close()
+        audio.close()
+        
+        # Удаление временного файла
+        os.unlink(temp_file_path)
     
     return audio_file_path
 
-
 def audio_to_text(audio_file):
-    recognizer = sr.Recognizer()
-    with sr.AudioFile(audio_file) as source:
-        audio_data = recognizer.record(source)
-        text = recognizer.recognize_google(audio_data, language='ru-RU')
+    with st.spinner("Транскрипция аудио..."):
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(audio_file) as source:
+            audio_data = recognizer.record(source)
+            text = recognizer.recognize_google(audio_data, language='ru-RU')
     return text
-
 
 def process_with_nvidia(transcript_text, api_key, messages, temperature, top_p, max_tokens):
     openai.api_base = "https://integrate.api.nvidia.com/v1"
@@ -68,7 +68,7 @@ def process_with_nvidia(transcript_text, api_key, messages, temperature, top_p, 
     if transcript_text:
         messages.append({"role": "user", "content": f"Пожалуйста, создай краткое содержание видео на русском языке, разделенное по темам. Используй форматирование, чтобы улучшить читаемость:\n\n{transcript_text}"})
     
-    with st.spinner("Конспектирование видео..."):
+    with st.spinner("Генерация краткого содержания (Nvidia)..."):
         completion = openai.ChatCompletion.create(
             model="meta/llama3-70b-instruct",
             messages=messages,
@@ -88,14 +88,13 @@ def process_with_nvidia(transcript_text, api_key, messages, temperature, top_p, 
     
     return response_text, messages
 
-
 def process_with_groq(transcript_text, api_key, model, messages):
     client = Groq(api_key=api_key)
     
     if transcript_text:
         messages.append({"role": "user", "content": f"Пожалуйста, создай краткое содержание видео на русском языке, разделенное по темам. Используй форматирование, чтобы улучшить читаемость:\n\n{transcript_text}"})
     
-    with st.spinner("Конспектирование видео..."):
+    with st.spinner("Генерация краткого содержания (Groq)..."):
         completion = client.chat.completions.create(
             model=model,
             messages=messages,
@@ -120,7 +119,7 @@ def process_with_free(transcript_text, messages):
     if transcript_text:
         messages.append({"role": "user", "content": f"Пожалуйста, создай краткое содержание видео на русском языке, разделенное по темам. Используй форматирование, чтобы улучшить читаемость:\n\n{transcript_text}"})
     
-    with st.spinner("Конспектирование видео..."):
+    with st.spinner("Генерация краткого содержания (Free)..."):
         completion = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=messages,
@@ -135,20 +134,22 @@ def process_with_free(transcript_text, messages):
     
     return response_text, messages
 
-
 def process_question(question, messages, provider, api_key, temperature=None, top_p=None, max_tokens=None, model=None):
     if provider == "Nvidia":
-        if api_key:
-            _, messages = process_with_nvidia("", api_key, messages, temperature, top_p, max_tokens)
-        else:
-            st.warning("Пожалуйста, введите API ключ для Nvidia.")
+        with st.spinner("Обработка вопроса (Nvidia)..."):
+            if api_key:
+                _, messages = process_with_nvidia("", api_key, messages, temperature, top_p, max_tokens)
+            else:
+                st.warning("Пожалуйста, введите API ключ для Nvidia.")
     elif provider == "Groq":
-        if api_key:
-            _, messages = process_with_groq("", api_key, model, messages)
-        else:
-            st.warning("Пожалуйста, введите API ключ для Groq.")
+        with st.spinner("Обработка вопроса (Groq)..."):
+            if api_key:
+                _, messages = process_with_groq("", api_key, model, messages)
+            else:
+                st.warning("Пожалуйста, введите API ключ для Groq.")
     else:
-        _, messages = process_with_free("", messages)
+        with st.spinner("Обработка вопроса (Free)..."):
+            _, messages = process_with_free("", messages)
     
     return messages
 
@@ -210,11 +211,14 @@ def main():
     
     if video_url or uploaded_video:
         if video_url:
-            video_id = get_video_id(video_url)
-            transcript_text = get_video_transcript(video_id)
+            with st.spinner("Получение ID видео..."):
+                video_id = get_video_id(video_url)
+            with st.spinner("Получение транскрипта видео..."):
+                transcript_text = get_video_transcript(video_id)
         else:
             audio_file = extract_audio(uploaded_video)
             transcript_text = audio_to_text(audio_file)
+
         
         messages = [{"role": "system", "content": f"Вы - помощник, который отвечает на вопросы по видео. Держите в уме текст видео и последние 5 вопросов пользователя."}]
         
